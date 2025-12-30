@@ -26,3 +26,10 @@
   - Define all the classes
   - Define all the parameters needed (distribution and all that)
   - Simulate
+- How to simulate
+  - Define all parameters at first (look in Population.py)
+  - Simulate each year
+- How to simulate each year
+    - Simulate deaths and births each year based on the number of births and deaths calculated
+    - Q: How to simulate births tho
+    - Have to have some way to have some data structures to pick parents for a child. So maybe maintain a couples dictionary (store the id for look up), a heap to store all people who are underaged, people who are of age but still singles (Probably store pair of age and id?). Well maybe everything stored should be id instead of a pointer to a Person object that's just not good. Also store a dictionary of all people with the key being id. Also probably should just make a separate file call Simulator.py. Population should only store basic information to initialize an information and it will call an instance of Simulator to simulate the population?

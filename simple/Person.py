@@ -1,17 +1,22 @@
+import string
+import random
+
 class Person:
     def __init__(self,
                  first_name, last_name, 
                  birth_year, death_year,
-                 gender, parents):
+                 gender, mom_id=None, dad_id=None):
+        
         self.id = id(self)
         self.first_name = first_name
         self.last_name = last_name
         self.birth_year = birth_year
         self.death_year = death_year
         self.gender = gender
-        self.parents = parents # List of 2 Person objects
-        self.partners = [] # List of Person objects
-        self.children = [] # List of Person objects
+        self.mom_id = mom_id
+        self.dad_id = dad_id
+        self.partner_id = None
+        self.children_ids = []
 
     def __eq__(self, value):
         if not isinstance(value, Person):
@@ -24,6 +29,9 @@ class Person:
     def full_name(self):
         return f"{self.first_name} {self.last_name}"
     
+    def generate_id(self):
+        # generate random 8-character alphanumeric ID
+        self.id = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 
     
     def is_ancestor_of(self, other) -> int:
@@ -79,34 +87,6 @@ class Person:
                 queue.append((parent, gen + 1))
         
         return most_recent_ancestor
-    
-    def possible_to_mate(self, other, current_year) -> bool:
-        # Return True if self and other can mate
-        if other is None:
-            return False
-        
-        self_age = current_year - self.birth_year
-        other_age = current_year - other.birth_year
-
-        max_age = max(self_age, other_age)
-        min_age = min(self_age, other_age)
-
-        if min_age < 18 or max_age > 55:
-            return False
-        
-        if min_age * 2 < max_age:
-            return False
-        
-        common_ancestor = self.get_most_recent_common_ancestor(other)
-        if common_ancestor is None:
-            return True
-        generations_self = common_ancestor.is_ancestor_of(self)
-        generations_other = common_ancestor.is_ancestor_of(other)
-
-        if min(generations_self, generations_other) < 3:
-            return False
-        
-        return True
     
 
 
