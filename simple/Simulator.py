@@ -1,8 +1,8 @@
 # This is the class to simulate population changes over time
 # Should simulate births, deaths, marriages (year by year)
 import numpy as np
+import utils
 import Person
-from scipy.optimize import brentq
 
 class Simulator:
     def __init__(self, period_length: int, starting_population: int, 
@@ -15,103 +15,165 @@ class Simulator:
         self.ending_population = ending_population
         self.life_expectancy = life_expectancy
         self.newborn_death_rate = newborn_death_rate
-        
-        # Calculated simulation parameters
-        self.growth_rate = np.log(ending_population / starting_population) / (period_length)
-        self.death_age_distribution = self.generate_death_age_distribution()
 
-        # Population data structures
-        self.people = self.generate_starting_population(starting_population)
-        self.couples = {} # dict Person id -> Person id (so it's easier to look up)
-        self.single_males = []
-        self.single_females = []
-        self.kids = []
-        # All these lists should be sorted by age (elder at the end)
-        # Each year, update and pop people who died or became adults
+        # Initialize data structures
+        self.people = {}
+        self.couples = set() # set of tuples (male_id, female_id)
+        self.single_m = set()
+        self.single_f = set()
+
+    def intialize_simulation(self):
+        # Calculated simulation parameters
+        self.growth_rate = np.log(self.ending_population / self.starting_population) / (self.period_length)
+        print("growth rate = ", self.growth_rate)
+        self.death_age_distribution = utils.generate_death_age_distribution(newborn_death_rate=self.newborn_death_rate,
+                                                                            life_expectancy=self.life_expectancy)
+        
+        print("Sum: ", sum(self.death_age_distribution.values()))
 
         # Annual statistics and events
-        self.annual_population = {self.current_year: starting_population}
+        self.annual_population = {self.current_year: self.starting_population}
         self.annual_birth = {}
-        for year in range(self.current_year + 1, self.current_year + period_length + 1):
+        for year in range(self.current_year + 1, self.current_year + self.period_length + 1):
             prev_population = self.annual_population[year - 1]
             new_population = int(prev_population * np.exp(self.growth_rate))
             self.annual_population[year] = new_population
-            self.annual_birth[year] = new_population - prev_population
+            # print(f"annual population {year} = ", self.annual_population[year])
         self.annual_death = {}
+        self.annual_adulting = {} # people turning 18 each year
+        self.current_population = self.starting_population
+
+        # Generate starting population
+        self.people, self.couples, self.single_m, self.single_f, self.annual_death = utils.generate_starting_population(
+            self.death_age_distribution, self.starting_population)
     
-    def generate_death_age_distribution(self, newborn_death_rate=None, life_expectancy=None, b=None):
-        # Gompertz mortality model with infant mortality
-        # random age at death (X)
-        # X = 1/b * ln(1 - b/a * ln(U)) where U ~ Uniform(0,1)
-        # b: aging rate (0.08 to 0.1 for humans)
-
-        if newborn_death_rate is None:
-            newborn_death_rate = self.newborn_death_rate
-        if life_expectancy is None:
-            life_expectancy = self.life_expectancy
-        if b is None:
-            b = 0.085  # Typical human aging rate
-
-        life_expectancy_adjusted = life_expectancy / (1 - newborn_death_rate)
-        distribution = {}
-
-        # 1. Define the Mean function for the Gompertz distribution
-        # Solve for 'a' to match the desired life expectancy
-        def gompertz_mean_diff(a_log):
-            a_val = np.exp(a_log)
-            # Integration of survival function to get mean
-            # S(x) = exp((a/b) * (1 - e^(bx)))
-            integrand = lambda x: np.exp((a_val / b) * (1 - np.exp(b * x)))
-            x = np.linspace(0, 150, 1000)
-            dx = x[1] - x[0]
-            mean_val = np.sum(integrand(x)) * dx
-            return mean_val - life_expectancy_adjusted
-
-        a_log = brentq(gompertz_mean_diff, -10, 10)
-        a = np.exp(a_log)
-
-        # 2. Generate data points for age at death
-        U = np.random.uniform(0, 1, int(10000 - newborn_death_rate * 10000))
-        U = np.clip(U, newborn_death_rate, 1)  # Avoid log(0)
-
-        age_at_death = (1 / b) * np.log(1 - (b / a) * np.log(U))
-        # print(age_at_death)
-        for age in age_at_death:
-            age_rounded_down = int(np.floor(age))
-            if age_rounded_down in distribution:
-                distribution[age_rounded_down] += 1
-            else:
-                distribution[age_rounded_down] = 1
-
-        distribution[0] = newborn_death_rate * 10000
+    def simulate_year(self, year: int):
+        # 1. Simulate deaths
+        if year in self.annual_death:
+            for person in self.annual_death[year]:
+                if person.id in self.single_m:
+                    self.single_m.remove(person.id)
+                if person.id in self.single_f:
+                    self.single_f.remove(person.id)
+                if person.partner_id is not None:
+                    partner = self.people[person.partner_id]
+                    partner.partner_id = None
+                    if partner.gender == "M":
+                        self.single_m.add(partner.id)
+                    else:
+                        self.single_f.add(partner.id)
         
-        for key, value in distribution.items():
-            distribution[key] = value / 10000.0  # Normalize to probabilities
-        
-        return distribution
-    
-    def generate_starting_population(self, n):
-        people = {}
-        for i in range(1, n + 1, 1):
-            death_age = np.random.choice(list(self.death_age_distribution.keys()), 
-                                         p=list(self.death_age_distribution.values()))
-            person = Person.Person(
-                first_name=f"M_{i}",
-                last_name=f"D_{i}",
-                birth_year=0,
-                death_year=death_age,
-                gender="M" if i % 2 == 0 else "F",
-                parents=[]
-            )
-            people[person.id] = person
-            if person.gender == "M":
-                if person.id + 1 <= n:
-                    self.couples[person.id] = person.id + 1
+        # 2. Move kids turning 18 to single pool
+        if year in self.annual_adulting:
+            for person in self.annual_adulting[year]:
+                if person.gender == "M":
+                    self.single_m.add(person.id)
                 else:
-                    self.single_males.append(person)
+                    self.single_f.add(person.id)
+        
+        # 3. Mating (forming couples)
+        # Call a mating function here
+        new_couples = utils.random_mate(self, self.people)
+        for couple in new_couples:
+            self.couples.add(couple)
+            if couple[0] in self.single_m:
+                self.single_m.remove(couple[0])
+            if couple[1] in self.single_f:
+                self.single_f.remove(couple[1])
 
-            if person.death_year not in self.annual_death:
-                self.annual_death[person.death_year] = []
-            self.annual_death[person.death_year].append(person)
+        # 4. Simulate births
+        # Select couples to have children based on birth rate
+        if year in self.annual_population:
+            if self.couples.__len__() == 0:
+                return
+            birth_rate = self.couples.__len__() / (self.annual_population[year] - self.current_population)
+            for couple in self.couples:
+                if np.random.rand() < birth_rate:
+                    father = self.people[couple[0]]
+                    mother = self.people[couple[1]]
+                    if father.gender != "M":
+                        father, mother = mother, father
+                    child = utils.create_child(mother, father, year, self.death_age_distribution)
+                    self.people[child.id] = child
+                    father.children_ids.append(child.id)
+                    mother.children_ids.append(child.id)
+                    if (year + 18) not in self.annual_adulting:
+                        self.annual_adulting[year + 18] = []
+                    self.annual_adulting[year + 18].append(child)
+    
+    def simulate(self):
+        self.intialize_simulation()
+        for year in range(self.current_year + 1, self.current_year + self.period_length + 1):
+            self.simulate_year(year)
+    
+    def print_data(self, folder_path: str):
+        # Print out data to files
+        with open(f"{folder_path}/people.txt", "w") as f:
+            for person_id, person in self.people.items():
+                f.write(f"{person_id}, {person.first_name}, {person.last_name}, {person.birth_year}, {person.death_year}, {person.gender}, {person.mom_id}, {person.dad_id}, {person.partner_id}, {person.children_ids}\n")
+        
+        # Print out annual statistics
+        with open(f"{folder_path}/annual_statistics.txt", "w") as f:
+            f.write("Year, Population, Births, Deaths, Adulting\n")
+            for year in range(self.current_year, self.current_year + self.period_length + 1):
+                population = self.annual_population.get(year, 0)
+                births = self.annual_birth.get(year, 0)
+                deaths = len(self.annual_death.get(year, []))
+                adulting = len(self.annual_adulting.get(year, []))
+                f.write(f"{year}, {population}, {births}, {deaths}, {adulting}\n")
+        
+        # Print out couples
+        with open(f"{folder_path}/couples.txt", "w") as f:
+            for couple in self.couples:
+                f.write(f"{couple[0]}, {couple[1]}\n")
+        
+        # Draw graphs
+        import matplotlib.pyplot as plt
 
-        return people
+        # Population over time
+        years = list(self.annual_population.keys())
+        populations = list(self.annual_population.values())
+        plt.plot(years, populations)
+        plt.xlabel("Year")
+        plt.ylabel("Population")
+        plt.savefig(f"{folder_path}/population_over_time.png")
+
+        # Last name distribution
+        last_name_count = {}
+        for person in self.people.values():
+            last_name_count[person.last_name] = last_name_count.get(person.last_name, 0) + 1
+
+        # Plot last name distribution
+        plt.figure()
+        plt.bar(last_name_count.keys(), last_name_count.values())
+        plt.xlabel("Last Name")
+        plt.ylabel("Count")
+        plt.savefig(f"{folder_path}/last_name_distribution.png")
+
+    def print_family_tree(self, person_id: str, max_generations: int, folder_path: str):
+        # Print family tree of a person up to max_generations
+        person = self.people.get(person_id, None)
+        if person is None:
+            return
+        
+        with open(f"{folder_path}/family_tree_{person_id}.txt", "w") as f:
+            def dfs(current_person: Person.Person, generation: int):
+                if generation > max_generations:
+                    return
+                f.write("  " * generation + f"{current_person.full_name()} ({current_person.birth_year}-{current_person.death_year})\n")
+                for child_id in current_person.children_ids:
+                    child = self.people.get(child_id, None)
+                    if child is not None:
+                        dfs(child, generation + 1)
+            dfs(person, 0)
+
+if __name__ == "__main__":
+    sim = Simulator(
+        period_length=100,
+        starting_population=10,
+        ending_population=1000,
+        life_expectancy=70,
+        newborn_death_rate=0.05
+    )
+    sim.simulate()
+    sim.print_data(folder_path="output")

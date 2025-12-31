@@ -17,9 +17,7 @@ class Population:
         self.newborn_death_rate = newborn_death_rate
         self.simulator = Simulator(period_length, starting_population, ending_population, life_expectancy, newborn_death_rate)
 
-    def simulate_population_growth(self):
-        for year in range(self.current_year + 1, self.current_year + self.period_length + 1):
-            self.simulator.simulate_year(year)
+    
 
 
             
