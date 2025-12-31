@@ -36,7 +36,7 @@ class Simulator:
         self.annual_birth = {}
         for year in range(self.current_year + 1, self.current_year + self.period_length + 1):
             prev_population = self.annual_population[year - 1]
-            new_population = int(prev_population * np.exp(self.growth_rate))
+            new_population = prev_population * np.exp(self.growth_rate)
             self.annual_population[year] = new_population
             # print(f"annual population {year} = ", self.annual_population[year])
         self.annual_death = {}
@@ -86,7 +86,7 @@ class Simulator:
         if year in self.annual_population:
             if self.couples.__len__() == 0:
                 return
-            birth_rate = self.couples.__len__() / (self.annual_population[year] - self.current_population)
+            birth_rate = (self.annual_population[year] - self.current_population) / self.couples.__len__()
             for couple in self.couples:
                 if np.random.rand() < birth_rate:
                     father = self.people[couple[0]]
@@ -94,6 +94,7 @@ class Simulator:
                     if father.gender != "M":
                         father, mother = mother, father
                     child = utils.create_child(mother, father, year, self.death_age_distribution)
+                    self.current_population += 1
                     self.people[child.id] = child
                     father.children_ids.append(child.id)
                     mother.children_ids.append(child.id)
